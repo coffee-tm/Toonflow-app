@@ -83,9 +83,9 @@ const modelList: Owned[] = [
   // 新增：智普模型配置
   { 
     manufacturer: "bigModel",
-    model: "Cogview-3-Flash", 
+    model: "cogview-3-flash", 
     grid: true,
-    type: "t2i",
+    type: "ti2i",
   },
   { 
     manufacturer: "bigModel", 
