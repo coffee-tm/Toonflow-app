@@ -11,6 +11,9 @@ import runninghub from "./owned/runninghub";
 import gemini from "./owned/gemini";
 import apimart from "./owned/apimart";
 import other from "./owned/other";
+// 【新增】导入魔塔/智普视频接口
+import modelScope from "./owned/modelScope";
+import bigModel from "./owned/bigModel";
 
 const modelInstance = {
   volcengine: volcengine,
@@ -20,6 +23,8 @@ const modelInstance = {
   gemini: gemini,
   runninghub: runninghub,
   apimart: apimart,
+  modelScope: modelScope, // 新增魔塔
+  bigModel: bigModel,     // 新增智普
   // other: other,
 } as const;
 
