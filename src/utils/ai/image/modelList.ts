@@ -71,11 +71,11 @@ const modelList: Owned[] = [
     manufacturer: "modelScope", 
     model: "Tongyi-MAI/Z-Image-Turbo", 
     grid: true,
-    type: "t2i",
+    type: "ti2i",
   },
   { 
     manufacturer: "modelScope", 
-    model: "Tongyi-MAI/Z-Image-Turbo", 
+    model: "MusePublic/489_ckpt_FLUX_1", 
     grid: true,
     type: "ti2i",
   },
