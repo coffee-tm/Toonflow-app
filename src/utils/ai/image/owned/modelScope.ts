@@ -1,64 +1,92 @@
-import type { ImageConfig, AIConfig } from "../type";
+import "../type";
 import axios from "axios";
+import u from "@/utils";
 
 /**
- * 魔塔ModelScope图片接口（贴合原项目入参/出参规范）
- * @param input 原项目ImageConfig类型
- * @param config 原项目AIConfig类型
- * @returns 图片URL | base64
+ * ModelScope 魔塔图像生成接口（原生API格式）
+ * 适用于特定的ModelScope模型
+ * @param input ImageConfig 类型
+ * @param config AIConfig 类型
+ * @returns 图片URL 或 base64
  */
-export default async (input: ImageConfig, config: AIConfig) => {
-  const { model, apiKey, baseURL } = config;
-  const modelScopeBaseUrl = baseURL || "https://inference.modelscope.cn/api/v1";
+export default async (input: ImageConfig, config: AIConfig): Promise<string> => {
+  // 参数校验
+  if (!config.model) throw new Error("缺少Model名称");
+  if (!config.apiKey) throw new Error("缺少API Key");
+  if (!input.prompt) throw new Error("缺少提示词，prompt为必填项");
 
-  // 构建魔塔请求参数（适配原项目ImageConfig）
+  // 清理API Key和baseURL（注意：原生格式使用不同的baseURL）
+  const apiKey = config.apiKey.replace(/^Bearer\s+/i, "").trim();
+  const baseURL = (config.baseURL || "https://api-inference.modelscope.cn/api/v1").replace(/\/+$/, "");
+
+  // 构建原生格式请求体
   const requestData: any = {
-    input: {},
+    input: {
+      prompt: input.prompt,
+    },
     parameters: {
-      // 复用原项目传入的额外参数
-      ...input.extraParams,
+      // 可以添加其他参数如 size, seed 等
+      ...(input.size && { size: input.size }),
+      ...(input.seed !== undefined && { seed: input.seed }),
     },
   };
 
-  // 处理图片输入（原项目支持imageBase64数组）
+  // 处理图片输入（图生图）
   if (input.imageBase64 && input.imageBase64.length > 0) {
-    // 魔塔接口默认取第一张图片
-    requestData.input.image = input.imageBase64[0];
+    // 原生格式通常需要去掉data URI前缀
+    requestData.input.image = input.imageBase64[0].replace(/^data:image\/[a-z]+;base64,/i, "");
   } else if (input.imageUrl) {
-    requestData.input.image = input.imageUrl;
-  } else {
-    throw new Error("魔塔接口：未传入有效图片（imageBase64/imageUrl）");
+    requestData.input.image_url = input.imageUrl;
   }
 
-  // 调用魔塔推理接口（原项目axios风格）
-  const response = await axios.post(
-    `${modelScopeBaseUrl}/models/${model}/inference`,
-    requestData,
-    {
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      timeout: 30000,
+  try {
+    // 调用ModelScope原生API
+    const { data } = await axios.post(
+      `${baseURL}/models/${config.model}/inference`,
+      requestData,
+      {
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 120000,
+      }
+    );
+
+    // 原生格式返回结构可能不同，需要适配
+    // 常见返回格式: { output: { image_url: string } } 或 { output: { image_base64: string } }
+    
+    if (data.output?.image_url) {
+      const imageUrl = data.output.image_url;
+      
+      if (input.resType === "b64") {
+        const res = await axios.get(imageUrl, { responseType: "arraybuffer" });
+        const base64 = Buffer.from(res.data).toString("base64");
+        const mimeType = res.headers["content-type"] || "image/png";
+        return `data:${mimeType};base64,${base64}`;
+      }
+      return imageUrl;
     }
-  );
+    
+    if (data.output?.image_base64) {
+      const base64 = data.output.image_base64;
+      // 确保有data URI前缀
+      if (base64.startsWith("data:image")) {
+        return base64;
+      }
+      return `data:image/png;base64,${base64}`;
+    }
+    
+    if (data.output?.text) {
+      // 文本类模型（如图像理解），按原项目规范返回
+      return `data:text/plain;base64,${Buffer.from(data.output.text).toString("base64")}`;
+    }
 
-  // 魔塔接口返回结果适配（按原项目规范返回图片URL/base64）
-  const result = response.data;
-  // 不同魔塔模型返回格式不同，兼容两种场景：
-  // 场景1：直接返回图片URL
-  if (result.output?.image_url) {
-    return result.output.image_url;
-  }
-  // 场景2：返回base64
-  if (result.output?.image_base64) {
-    return result.output.image_base64;
-  }
-  // 场景3：返回文本结果（如图片分析），适配原项目返回格式
-  if (result.output?.text) {
-    // 若为文本类模型，返回特殊标识（贴合原项目逻辑）
-    return `data:text/plain;base64,${Buffer.from(result.output.text).toString("base64")}`;
-  }
+    console.error("ModelScope返回数据:", data);
+    throw new Error("ModelScope接口返回格式不支持或未获取到图片");
 
-  throw new Error("魔塔接口返回格式不支持");
+  } catch (error) {
+    const msg = u.error(error).message || "ModelScope图像生成失败";
+    throw new Error(msg);
+  }
 };
