@@ -66,6 +66,33 @@ const modelList: Owned[] = [
     grid: true,
     type: "ti2i",
   },
+  // 新增：魔塔模型配置
+  { 
+    manufacturer: "modelScope", 
+    model: "Tongyi-MAI/Z-Image-Turbo", 
+    grid: true,
+    type: "t2i",
+  },
+  { 
+    manufacturer: "modelScope", 
+    model: "Tongyi-MAI/Z-Image-Turbo", 
+    grid: true,
+    type: "ti2i",
+  },
+  
+  // 新增：智普模型配置
+  { 
+    manufacturer: "bigModel",
+    model: "Cogview-3-Flash", 
+    grid: true,
+    type: "t2i",
+  },
+  { 
+    manufacturer: "bigModel", 
+    model: "GLM-Image",
+    grid: true,
+    type: "ti2i", 
+  },
 ];
 
 export default modelList;
