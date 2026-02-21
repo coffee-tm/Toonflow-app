@@ -484,6 +484,74 @@ const modelList: Owned[] = [
     type: ["singleImage", "text"],
     audio: false,
   },
+  // ================== 魔塔（ModelScope）系列 【新增】==================
+  // 文生视频（cogvideox 系列）
+  {
+    manufacturer: "modelScope",
+    model: "cv/text-to-video-synthesis",
+    durationResolutionMap: [{ duration: [3, 5, 8, 10], resolution: ["720p", "1080p"] }],
+    aspectRatio: ["16:9", "9:16", "1:1"],
+    type: ["text"],
+    audio: false,
+  },
+  // 图生视频（cogvideox 系列）
+  {
+    manufacturer: "modelScope",
+    model: "cv/image-to-video-synthesis",
+    durationResolutionMap: [{ duration: [3, 5, 8, 10], resolution: ["720p", "1080p"] }],
+    aspectRatio: ["16:9", "9:16", "1:1"],
+    type: ["singleImage"],
+    audio: false,
+  },
+  // 视频行为识别
+  {
+    manufacturer: "modelScope",
+    model: "cv/action-recognition-video",
+    durationResolutionMap: [{ duration: [5, 10], resolution: ["720p", "1080p"] }],
+    aspectRatio: [],
+    type: ["singleImage"],
+    audio: false,
+  },
+  // 视频字幕生成
+  {
+    manufacturer: "modelScope",
+    model: "cv/video-captioning",
+    durationResolutionMap: [{ duration: [5, 10, 15], resolution: ["720p", "1080p"] }],
+    aspectRatio: [],
+    type: ["singleImage"],
+    audio: false,
+  },
+  // ================== 智普（BigModel）系列 【新增】==================
+  // cogvideox-3 视频生成（官方原版，完整支持所有size枚举）
+  {
+    manufacturer: "bigModel",
+    model: "cogvideox-3",
+    durationResolutionMap: [{ 
+      duration: [2, 4, 6, 8, 10], 
+      resolution: ["720p", "1080p", "2160p", "1024p"] // 对应720p/1080p/4K/1024p
+    }],
+    aspectRatio: ["16:9", "9:16", "1:1", "21:9"], // 覆盖所有size对应的宽高比
+    type: ["text", "singleImage", "startEndRequired"], // 文生/单图/首尾帧
+    audio: true,
+  },
+  // GLM-4V 视频分析
+  {
+    manufacturer: "bigModel",
+    model: "glm-4v",
+    durationResolutionMap: [{ duration: [5, 10, 15], resolution: ["720p", "1080p"] }],
+    aspectRatio: [],
+    type: ["singleImage", "text"],
+    audio: false,
+  },
+  // GLM-4V-plus 视频分析增强版
+  {
+    manufacturer: "bigModel",
+    model: "glm-4v-plus",
+    durationResolutionMap: [{ duration: [5, 10, 15, 20], resolution: ["720p", "1080p"] }],
+    aspectRatio: [],
+    type: ["singleImage", "text"],
+    audio: false,
+  }, 
 ];
 
 export default modelList;
