@@ -6,10 +6,6 @@ import u from "@/utils";
 
 /**
  * 通用OpenAI兼容接口 + 智谱AI + 魔塔ModelScope 图像生成
- * 支持：
- * - 标准OpenAI兼容接口（原有功能）
- * - 智谱AI CogView-3-Flash/CogView-4（图像生成）
- * - 魔塔ModelScope（图像生成）
  */
 export default async (input: ImageConfig, config: AIConfig): Promise<string> => {
   if (!config.model) throw new Error("缺少Model名称");
@@ -17,24 +13,27 @@ export default async (input: ImageConfig, config: AIConfig): Promise<string> => 
 
   const model = config.model;
   const apiKey = config.apiKey.replace(/^Bearer\s+/i, "").trim();
+  
+  // 清理baseURL，去除首尾空格
+  const baseURL = config.baseURL ? config.baseURL.trim() : "";
 
-  // ==================== 智谱AI (CogView) ====================
-  if (model.includes("cogview") || model.includes("GLM-Image")) {
-    return await generateZhipuImage(input, config);
+  // ==================== 智谱AI (CogView) - 不区分大小写 ====================
+  if (model.toLowerCase().includes("cogview") || model.toLowerCase().includes("glm-image")) {
+    return await generateZhipuImage(input, { ...config, apiKey, baseURL });
   }
 
   // ==================== 魔塔ModelScope (图像生成) ====================
-  if (model.includes("Z-Image") || model.includes("modelscope") || model.includes("/")) {
-    // ModelScope模型ID通常包含斜杠，如：Tongyi-MAI/Z-Image-Turbo
-    return await generateModelScopeImage(input, config);
+  // ModelScope模型ID通常包含斜杠，如：Tongyi-MAI/Z-Image-Turbo
+  if (model.includes("/") || model.toLowerCase().includes("modelscope") || model.toLowerCase().includes("z-image")) {
+    return await generateModelScopeImage(input, { ...config, apiKey, baseURL });
   }
 
   // ==================== 标准OpenAI兼容接口（原有逻辑） ====================
-  if (!config.baseURL) throw new Error("缺少baseUrl");
+  if (!baseURL) throw new Error("缺少baseUrl");
 
   const otherProvider = createOpenAICompatible({
     name: "xixixi",
-    baseURL: config.baseURL,
+    baseURL: baseURL,
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
@@ -128,97 +127,26 @@ export default async (input: ImageConfig, config: AIConfig): Promise<string> => 
 
 /**
  * 智谱AI CogView 图像生成
- * API文档: https://docs.bigmodel.cn/cn/guide/models/free/cogview-3-flash
  */
 async function generateZhipuImage(input: ImageConfig, config: AIConfig): Promise<string> {
-  const apiKey = config.apiKey.replace(/^Bearer\s+/i, "").trim();
+  const apiKey = config.apiKey;
   const baseURL = (config.baseURL || "https://open.bigmodel.cn/api/paas/v4").replace(/\/+$/, "");
   
-  // 构建请求体
+  console.log("%c 智谱AI请求", "background:#33a5ff", { model: config.model, baseURL });
+  
   const body: Record<string, any> = {
     model: config.model,
     prompt: input.prompt,
   };
 
-  // 添加可选参数
   if (input.size) {
-    // 智谱支持的尺寸: 1024x1024, 768x1344, 864x1152, 1344x768, 1152x864, 1440x720, 720x1440
     body.size = input.size;
   }
   
   if (input.quality) {
-    body.quality = input.quality; // standard 或 hd
+    body.quality = input.quality;
   }
 
-  // 图生图：如果提供了参考图片
-  if (input.imageBase64 && input.imageBase64.length > 0) {
-    // 智谱CogView支持image参数进行图生图
-    const cleanBase64 = input.imageBase64[0].replace(/^data:image\/[a-z]+;base64,/i, "");
-    body.image = cleanBase64;
-  }
-
-  try {
-    const { data } = await axios.post(
-      `${baseURL}/images/generations`,
-      body,
-      {
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        timeout: 120000, // 图像生成可能需要较长时间
-      }
-    );
-
-    // 智谱返回格式: { created: number, data: [{ url: string, revised_prompt?: string }] }
-    if (!data.data || !data.data[0]?.url) {
-      console.error("智谱API返回:", data);
-      throw new Error("智谱API返回格式错误，未获取到图片URL");
-    }
-
-    const imageUrl = data.data[0].url;
-    
-    // 如果要求返回base64格式，需要下载转换
-    if (input.resType === "b64") {
-      const res = await axios.get(imageUrl, { responseType: "arraybuffer" });
-      const base64 = Buffer.from(res.data).toString("base64");
-      const mimeType = res.headers["content-type"] || "image/png";
-      return `data:${mimeType};base64,${base64}`;
-    }
-    
-    return imageUrl;
-    
-  } catch (error) {
-    const msg = u.error(error).message || "智谱图像生成失败";
-    throw new Error(msg);
-  }
-}
-
-/**
- * 魔塔ModelScope 图像生成
- * API文档: https://www.modelscope.cn/docs/model-service/API-Inference/intro
- * 使用OpenAI兼容格式: https://api-inference.modelscope.cn/v1/images/generations
- */
-async function generateModelScopeImage(input: ImageConfig, config: AIConfig): Promise<string> {
-  const apiKey = config.apiKey.replace(/^Bearer\s+/i, "").trim();
-  const baseURL = (config.baseURL || "https://api-inference.modelscope.cn/v1").replace(/\/+$/, "");
-
-  const body: Record<string, any> = {
-    model: config.model,
-    prompt: input.prompt,
-    n: 1,
-  };
-
-  // 添加可选参数
-  if (input.size) {
-    body.size = input.size; // 如: "1024x1024"
-  }
-  
-  if (input.seed !== undefined) {
-    body.seed = input.seed;
-  }
-
-  // 图生图：如果提供了参考图片
   if (input.imageBase64 && input.imageBase64.length > 0) {
     const cleanBase64 = input.imageBase64[0].replace(/^data:image\/[a-z]+;base64,/i, "");
     body.image = cleanBase64;
@@ -237,10 +165,75 @@ async function generateModelScopeImage(input: ImageConfig, config: AIConfig): Pr
       }
     );
 
-    // ModelScope返回格式: { images: [{ url: string, seed?: number }] }
+    console.log("%c 智谱AI返回", "background:#4fff4B", data);
+
+    if (!data.data || !data.data[0]?.url) {
+      throw new Error("智谱API返回格式错误: " + JSON.stringify(data));
+    }
+
+    const imageUrl = data.data[0].url;
+    
+    if (input.resType === "b64") {
+      const res = await axios.get(imageUrl, { responseType: "arraybuffer" });
+      const base64 = Buffer.from(res.data).toString("base64");
+      const mimeType = res.headers["content-type"] || "image/png";
+      return `data:${mimeType};base64,${base64}`;
+    }
+    
+    return imageUrl;
+    
+  } catch (error: any) {
+    console.error("%c 智谱AI错误", "background:#ff3333", error.response?.data || error.message);
+    const msg = u.error(error).message || "智谱图像生成失败";
+    throw new Error(msg);
+  }
+}
+
+/**
+ * 魔塔ModelScope 图像生成 - 使用OpenAI兼容格式
+ */
+async function generateModelScopeImage(input: ImageConfig, config: AIConfig): Promise<string> {
+  const apiKey = config.apiKey;
+  const baseURL = (config.baseURL || "https://api-inference.modelscope.cn/v1").replace(/\/+$/, "");
+  
+  console.log("%c ModelScope请求", "background:#33a5ff", { model: config.model, baseURL });
+
+  const body: Record<string, any> = {
+    model: config.model,
+    prompt: input.prompt,
+    n: 1,
+  };
+
+  if (input.size) {
+    body.size = input.size;
+  }
+  
+  if (input.seed !== undefined) {
+    body.seed = input.seed;
+  }
+
+  if (input.imageBase64 && input.imageBase64.length > 0) {
+    const cleanBase64 = input.imageBase64[0].replace(/^data:image\/[a-z]+;base64,/i, "");
+    body.image = cleanBase64;
+  }
+
+  try {
+    const { data } = await axios.post(
+      `${baseURL}/images/generations`,
+      body,
+      {
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 120000,
+      }
+    );
+
+    console.log("%c ModelScope返回", "background:#4fff4B", data);
+
     if (!data.images || !data.images[0]?.url) {
-      console.error("ModelScope返回:", data);
-      throw new Error("ModelScope API返回格式错误，未获取到图片URL");
+      throw new Error("ModelScope API返回格式错误: " + JSON.stringify(data));
     }
 
     const imageUrl = data.images[0].url;
@@ -254,7 +247,8 @@ async function generateModelScopeImage(input: ImageConfig, config: AIConfig): Pr
     
     return imageUrl;
     
-  } catch (error) {
+  } catch (error: any) {
+    console.error("%c ModelScope错误", "background:#ff3333", error.response?.data || error.message);
     const msg = u.error(error).message || "ModelScope图像生成失败";
     throw new Error(msg);
   }
