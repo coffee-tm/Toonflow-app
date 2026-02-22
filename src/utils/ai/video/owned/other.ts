@@ -1,37 +1,34 @@
 import "../type";
 import axios from "axios";
-import sharp from "sharp";
 import FormData from "form-data";
-import { pollTask, validateVideoConfig } from "@/utils/ai/utils";
-import { createOpenAI } from "@ai-sdk/openai";
+import { pollTask } from "@/utils/ai/utils";
 import u from "@/utils";
 
 /**
  * 通用OpenAI兼容接口 + 智谱AI + 魔塔ModelScope 视频生成
- * 支持：
- * - 标准OpenAI兼容接口（原有功能）
- * - 智谱AI CogVideoX-Flash（视频生成）
- * - 魔塔ModelScope（视频生成）
  */
 export default async (input: VideoConfig, config: AIConfig) => {
   if (!config.apiKey) throw new Error("缺少API Key");
+  if (!config.model) throw new Error("缺少Model名称");
 
-  const model = config.model || "";
+  const model = config.model;
+  const apiKey = config.apiKey.replace(/^Bearer\s+/i, "").trim();
+  const baseURL = config.baseURL ? config.baseURL.trim() : "";
 
   // ==================== 智谱AI (CogVideoX) ====================
-  if (model.includes("cogvideo") || model.includes("CogVideo")) {
-    return await generateZhipuVideo(input, config);
+  if (model.toLowerCase().includes("cogvideo")) {
+    return await generateZhipuVideo(input, { ...config, apiKey, baseURL });
   }
 
   // ==================== 魔塔ModelScope (视频生成) ====================
-  if (model.includes("video") && (model.includes("modelscope") || model.includes("/") || config.baseURL?.includes("modelscope"))) {
-    return await generateModelScopeVideo(input, config);
+  if (model.includes("/") || model.toLowerCase().includes("modelscope")) {
+    return await generateModelScopeVideo(input, { ...config, apiKey, baseURL });
   }
 
   // ==================== 标准OpenAI兼容接口（原有逻辑） ====================
-  if (!config.baseURL) throw new Error("缺少baseURL");
-
-  const [requestUrl, queryUrl] = config.baseURL.split("|");
+  if (!baseURL) throw new Error("缺少baseURL");
+  
+  const [requestUrl, queryUrl] = baseURL.split("|");
   const authorization = `Bearer ${config.apiKey}`;
 
   const formData = new FormData();
@@ -39,7 +36,6 @@ export default async (input: VideoConfig, config: AIConfig) => {
   formData.append("prompt", input.prompt);
   formData.append("seconds", String(input.duration));
 
-  // 根据 aspectRatio 设置 size
   const sizeMap: Record<string, string> = {
     "16:9": "1920x1080",
     "9:16": "1080x1920",
@@ -79,25 +75,22 @@ export default async (input: VideoConfig, config: AIConfig) => {
 
 /**
  * 智谱AI CogVideoX 视频生成
- * API文档: https://docs.bigmodel.cn/cn/guide/models/free/cogvideox-flash
- * 支持 CogVideoX-Flash 等模型
  */
 async function generateZhipuVideo(input: VideoConfig, config: AIConfig) {
-  const apiKey = config.apiKey.replace(/^Bearer\s+/i, "").trim();
+  const apiKey = config.apiKey;
   const baseURL = (config.baseURL || "https://open.bigmodel.cn/api/paas/v4").replace(/\/+$/, "");
 
-  // 构建请求体
+  console.log("%c 智谱视频请求", "background:#33a5ff", { model: config.model, baseURL });
+
   const body: Record<string, any> = {
     model: config.model,
     prompt: input.prompt,
   };
 
-  // 添加可选参数
   if (input.duration) {
-    body.duration = input.duration; // 视频时长（秒）
+    body.duration = input.duration;
   }
   
-  // 尺寸设置
   if (input.aspectRatio) {
     const ratioMap: Record<string, string> = {
       "16:9": "1920x1080",
@@ -107,15 +100,14 @@ async function generateZhipuVideo(input: VideoConfig, config: AIConfig) {
     body.size = ratioMap[input.aspectRatio] || "1920x1080";
   }
 
-  // 图生视频：如果提供了参考图片
   if (input.imageBase64 && input.imageBase64.length > 0) {
-    // 智谱CogVideoX支持image参数
     const cleanBase64 = input.imageBase64[0].replace(/^data:image\/[a-z]+;base64,/i, "");
     body.image = cleanBase64;
   }
 
   try {
-    // 提交生成任务
+    console.log("%c 智谱视频请求体", "background:#33a5ff", body);
+    
     const { data } = await axios.post(
       `${baseURL}/videos/generations`,
       body,
@@ -128,49 +120,55 @@ async function generateZhipuVideo(input: VideoConfig, config: AIConfig) {
       }
     );
 
-    // 智谱返回: { id: string, model: string, request_id: string }
+    console.log("%c 智谱视频提交返回", "background:#4fff4B", data);
+
     if (!data.id) {
-      console.error("智谱API返回:", data);
-      throw new Error("智谱视频生成任务提交失败，未获取到任务ID");
+      throw new Error("智谱视频生成任务提交失败: " + JSON.stringify(data));
     }
 
     const taskId = data.id;
 
-    // 轮询查询任务状态
     return await pollTask(async () => {
-      const { data: queryData } = await axios.get(
-        `${baseURL}/videos/${taskId}`,
-        {
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-          },
-          timeout: 30000,
+      try {
+        const { data: queryData } = await axios.get(
+          `${baseURL}/videos/${taskId}`,
+          {
+            headers: {
+              "Authorization": `Bearer ${apiKey}`,
+            },
+            timeout: 30000,
+          }
+        );
+
+        console.log("%c 智谱视频查询返回", "background:#4fff4B", queryData);
+
+        const status = queryData.status;
+
+        if (status === "SUCCESS" || status === "succeed") {
+          const videoUrl = queryData.video_result?.url || queryData.url;
+          if (!videoUrl) {
+            return { completed: false, error: "任务成功但未返回视频链接" };
+          }
+          return { completed: true, url: videoUrl };
         }
-      );
 
-      // 智谱返回格式: { id, model, status: "PROCESSING" | "SUCCESS" | "FAILED", video_result?: { url: string } }
-      const status = queryData.status;
-
-      if (status === "SUCCESS") {
-        const videoUrl = queryData.video_result?.url;
-        if (!videoUrl) {
-          return { completed: false, error: "任务成功但未返回视频链接" };
+        if (status === "FAILED" || status === "failed") {
+          return { completed: false, error: `任务失败: ${queryData.error || queryData.errorMessage || "未知错误"}` };
         }
-        return { completed: true, url: videoUrl };
-      }
 
-      if (status === "FAILED") {
-        return { completed: false, error: `任务失败: ${queryData.error || "未知错误"}` };
-      }
+        if (status === "PROCESSING" || status === "PENDING" || status === "RUNNING") {
+          return { completed: false };
+        }
 
-      if (status === "PROCESSING" || status === "PENDING") {
-        return { completed: false };
+        return { completed: false, error: `未知状态: ${status}` };
+      } catch (pollError: any) {
+        console.error("%c 智谱视频轮询错误", "background:#ff3333", pollError.response?.data || pollError.message);
+        return { completed: false, error: `查询任务失败: ${pollError.message}` };
       }
-
-      return { completed: false, error: `未知状态: ${status}` };
     });
 
-  } catch (error) {
+  } catch (error: any) {
+    console.error("%c 智谱视频错误", "background:#ff3333", error.response?.data || error.message);
     const msg = u.error(error).message || "智谱视频生成失败";
     throw new Error(msg);
   }
@@ -178,42 +176,38 @@ async function generateZhipuVideo(input: VideoConfig, config: AIConfig) {
 
 /**
  * 魔塔ModelScope 视频生成
- * API文档: https://www.modelscope.cn/docs/model-service/API-Inference/intro
- * 使用原生API格式或OpenAI兼容格式
  */
 async function generateModelScopeVideo(input: VideoConfig, config: AIConfig) {
-  const apiKey = config.apiKey.replace(/^Bearer\s+/i, "").trim();
-  
-  // ModelScope视频生成通常使用原生API
-  const baseURL = (config.baseURL || "https://api-inference.modelscope.cn/api/v1").replace(/\/+$/, "");
+  const apiKey = config.apiKey;
+  const baseURL = (config.baseURL || "https://api-inference.modelscope.cn/v1").replace(/\/+$/, "");
 
-  // 构建请求体（原生格式）
+  console.log("%c ModelScope视频请求", "background:#33a5ff", { model: config.model, baseURL });
+
+  // 使用OpenAI兼容格式
   const body: Record<string, any> = {
-    input: {
-      prompt: input.prompt,
-    },
-    parameters: {},
+    model: config.model,
+    prompt: input.prompt,
   };
 
-  // 添加参数
   if (input.duration) {
-    body.parameters.duration = input.duration;
+    body.duration = input.duration;
   }
 
   if (input.aspectRatio) {
-    body.parameters.aspect_ratio = input.aspectRatio;
+    body.aspect_ratio = input.aspectRatio;
   }
 
-  // 图生视频
   if (input.imageBase64 && input.imageBase64.length > 0) {
     const cleanBase64 = input.imageBase64[0].replace(/^data:image\/[a-z]+;base64,/i, "");
-    body.input.image = cleanBase64;
+    body.image = cleanBase64;
   }
 
   try {
-    // 提交任务
+    console.log("%c ModelScope视频请求体", "background:#33a5ff", body);
+    
+    // 先尝试OpenAI兼容格式
     const { data } = await axios.post(
-      `${baseURL}/models/${config.model}/inference`,
+      `${baseURL}/videos/generations`,
       body,
       {
         headers: {
@@ -224,54 +218,61 @@ async function generateModelScopeVideo(input: VideoConfig, config: AIConfig) {
       }
     );
 
-    // ModelScope返回格式可能因模型而异，这里处理常见的异步任务格式
-    // 有些模型直接返回结果，有些返回任务ID需要轮询
-    const taskId = data.output?.task_id || data.task_id || data.id;
+    console.log("%c ModelScope视频提交返回", "background:#4fff4B", data);
 
-    if (!taskId) {
-      // 如果直接返回了结果
-      if (data.output?.video_url || data.video_url) {
-        const videoUrl = data.output?.video_url || data.video_url;
-        return { completed: true, url: videoUrl };
-      }
-      console.error("ModelScope返回:", data);
-      throw new Error("ModelScope视频生成失败，未获取到任务ID或结果");
+    // 处理直接返回结果的情况
+    if (data.video_url || data.url) {
+      return { completed: true, url: data.video_url || data.url };
     }
 
-    // 轮询查询任务状态
+    // 处理异步任务
+    const taskId = data.id || data.task_id || data.output?.task_id;
+    
+    if (!taskId) {
+      throw new Error("ModelScope视频生成失败，未获取到任务ID: " + JSON.stringify(data));
+    }
+
     return await pollTask(async () => {
-      const { data: queryData } = await axios.get(
-        `${baseURL}/tasks/${taskId}`,
-        {
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-          },
-          timeout: 30000,
+      try {
+        const { data: queryData } = await axios.get(
+          `${baseURL}/tasks/${taskId}`,
+          {
+            headers: {
+              "Authorization": `Bearer ${apiKey}`,
+            },
+            timeout: 30000,
+          }
+        );
+
+        console.log("%c ModelScope视频查询返回", "background:#4fff4B", queryData);
+
+        const status = queryData.status || queryData.output?.status;
+
+        if (status === "SUCCEEDED" || status === "SUCCESS" || status === "succeed") {
+          const videoUrl = queryData.video_url || queryData.output?.video_url || queryData.results?.[0]?.url;
+          if (!videoUrl) {
+            return { completed: false, error: "任务成功但未返回视频链接" };
+          }
+          return { completed: true, url: videoUrl };
         }
-      );
 
-      const status = queryData.status || queryData.output?.status;
-
-      if (status === "SUCCEEDED" || status === "SUCCESS") {
-        const videoUrl = queryData.output?.video_url || queryData.video_url || queryData.results?.[0]?.url;
-        if (!videoUrl) {
-          return { completed: false, error: "任务成功但未返回视频链接" };
+        if (status === "FAILED" || status === "failed") {
+          return { completed: false, error: `任务失败: ${queryData.error || queryData.message || "未知错误"}` };
         }
-        return { completed: true, url: videoUrl };
-      }
 
-      if (status === "FAILED") {
-        return { completed: false, error: `任务失败: ${queryData.error || queryData.message || "未知错误"}` };
-      }
+        if (status === "RUNNING" || status === "PENDING" || status === "QUEUED" || status === "PROCESSING") {
+          return { completed: false };
+        }
 
-      if (status === "RUNNING" || status === "PENDING" || status === "QUEUED") {
-        return { completed: false };
+        return { completed: false, error: `未知状态: ${status}` };
+      } catch (pollError: any) {
+        console.error("%c ModelScope视频轮询错误", "background:#ff3333", pollError.response?.data || pollError.message);
+        return { completed: false, error: `查询任务失败: ${pollError.message}` };
       }
-
-      return { completed: false, error: `未知状态: ${status}` };
     });
 
-  } catch (error) {
+  } catch (error: any) {
+    console.error("%c ModelScope视频错误", "background:#ff3333", error.response?.data || error.message);
     const msg = u.error(error).message || "ModelScope视频生成失败";
     throw new Error(msg);
   }
