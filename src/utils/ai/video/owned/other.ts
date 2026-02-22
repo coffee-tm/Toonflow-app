@@ -183,7 +183,6 @@ async function generateModelScopeVideo(input: VideoConfig, config: AIConfig) {
 
   console.log("%c ModelScope视频请求", "background:#33a5ff", { model: config.model, baseURL });
 
-  // 使用OpenAI兼容格式
   const body: Record<string, any> = {
     model: config.model,
     prompt: input.prompt,
@@ -205,7 +204,6 @@ async function generateModelScopeVideo(input: VideoConfig, config: AIConfig) {
   try {
     console.log("%c ModelScope视频请求体", "background:#33a5ff", body);
     
-    // 先尝试OpenAI兼容格式
     const { data } = await axios.post(
       `${baseURL}/videos/generations`,
       body,
@@ -220,12 +218,10 @@ async function generateModelScopeVideo(input: VideoConfig, config: AIConfig) {
 
     console.log("%c ModelScope视频提交返回", "background:#4fff4B", data);
 
-    // 处理直接返回结果的情况
     if (data.video_url || data.url) {
       return { completed: true, url: data.video_url || data.url };
     }
 
-    // 处理异步任务
     const taskId = data.id || data.task_id || data.output?.task_id;
     
     if (!taskId) {
